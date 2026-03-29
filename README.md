@@ -1,3 +1,5 @@
+**日本語** | [English](README.en.md)
+
 # LINORIN Free
 
 **LINORIN** — Google Apps Script で動く AI チャットボット。LINE / Slack と Gemini API を繋ぎ、沈黙検知による自発的なプッシュ通知まで対応した軽量ボット基盤です。
