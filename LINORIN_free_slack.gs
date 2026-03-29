@@ -4,7 +4,7 @@
 // A Runtime Intelligent Node for Multi-Channel LLM Orchestration
 // Author: @yasaihouse
 // Version: 1.1.0-Free-Slack
-// Note: https://note.com/nou_yakareta
+// Note: https://note.com/nou_yakareta/m/mb0c5401f132f
 // =====================================
 // 本コードは個人利用・学習目的での使用を許可します。
 // 改変・カスタマイズは自由ですが、

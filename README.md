@@ -4,7 +4,7 @@
 
 > **無料版の制限について:**
 > このリポジトリは機能限定の無料版です。キャラクター設定・各種パラメータはコードに直書きされています。
-> スプレッドシートから全設定を変更できる完全版・有料版はこちら → **[note.com/nou_yakareta](https://note.com/nou_yakareta)**
+> スプレッドシートから全設定を変更できる完全版・有料版はこちら → **[note.com/nou_yakareta](https://note.com/nou_yakareta/m/mb0c5401f132f)**
 
 ---
 
@@ -168,4 +168,4 @@ const probability = Math.pow(ratio, curvePower) * timeWeight;
 **@yasaihouse**
 
 完全版・有料版の購入・サポートはこちら:
-👉 **[https://note.com/nou_yakareta](https://note.com/nou_yakareta)**
+👉 **[https://note.com/nou_yakareta/m/mb0c5401f132f](https://note.com/nou_yakareta/m/mb0c5401f132f)**

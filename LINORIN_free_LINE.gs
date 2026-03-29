@@ -3,7 +3,7 @@
 // Linked Intelligence Network Orchestrator
 // A Runtime Intelligent Node for Multi-Channel LLM Orchestration
 // Author: @yasaihouse
-// Note: https://note.com/nou_yakareta
+// Note: https://note.com/nou_yakareta/m/mb0c5401f132f
 // Version: 1.1.0-Free-LINE
 // =====================================
 // 本コードは個人利用・学習目的での使用を許可します。
