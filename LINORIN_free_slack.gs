@@ -15,31 +15,57 @@
 // これは無料版（Slack専用）です。
 // 詳細な設定（性格、確率、エラーメッセージ等）を変更するには
 // コード内の各数値を直接書き換える必要があります。
-// 便利な設定変更付きの完全版は有料で配布予定です。
+// 便利な設定変更付きの完全版はこちらで配布中です → https://note.com/nou_yakareta/m/mb0c5401f132f
 // ポモドーロタイマーは本バージョンでは実際には利用できません。
 // =====================================
 
 // ▼▼▼ 唯一設定が必要なエリア ▼▼▼
 
 // あなたの呼び名
-const USER_NAME = ""マスター"";
+const USER_NAME = "マスター";
 
 // パートナー（ロボット）の名前
-const PARTNER_NAME = ""ロボ"";
+const PARTNER_NAME = "ロボ";
 
 // Google AI StudioのAPIキー
-const GEMINI_API_KEY = ""★ここにGoogle AI StudioのAPIキーを入れます"";
+const GEMINI_API_KEY = "★ここにGoogle AI StudioのAPIキーを入れます";
 
 // Slack Bot Token（xoxb-から始まる）
-const SLACK_BOT_TOKEN = ""★ここにSlack Bot Tokenを入れます"";
+const SLACK_BOT_TOKEN = "★ここにSlack Bot Tokenを入れます";
 
 // 送信先チャンネルID（Cから始まる）
-const SLACK_CHANNEL_ID = ""★ここにチャンネルIDを入れます"";
+const SLACK_CHANNEL_ID = "★ここにチャンネルIDを入れます";
 
 // 使用するモデル
-const MODEL_NAME = ""gemini-2.0-flash"";
+const MODEL_NAME = "gemini-flash-latest";
 
 // ▲▲▲ 設定エリア終了 ▲▲▲
+
+
+// ▼▼▼ 挙動カスタマイズ（お好みで調整。setup()の再実行は不要） ▼▼▼
+
+// --- 孤独プッシュ（沈黙検知）---
+const DAILY_PUSH_LIMIT = 5;     // 1日のpush上限
+const SILENCE_MIN      = 60;    // 抽選開始までの沈黙時間（分）／会話後に再抽選対象になるまでの時間でもある
+const CEILING_MIN      = 480;   // 天井：確率100%到達までの沈黙時間（分）
+const CURVE_POWER      = 1.3;   // 確率曲線の形状（0.5=甘えん坊 / 1.3=標準 / 2.0=クール）
+const LONELY_FACTOR    = 1.0;   // 寂しさ係数
+const WEIGHT_MORNING   = 0.7;   // 朝 (06-10) の発生係数。0=オフ
+const WEIGHT_DAY       = 1.0;   // 昼 (10-18) の発生係数
+const WEIGHT_EVENING   = 1.2;   // 夜 (18-22) の発生係数
+const WEIGHT_NIGHT     = 0.0;   // 深夜 (22-06) の発生係数。0=おやすみモード
+const PUSH_COOLDOWN_SEC = 300;  // pushが当たった後のクールダウン（秒）
+
+// --- 会話・ログ ---
+const HISTORY_LIMIT = 5;     // 直近何件の会話をAIに渡すか
+const LOG_MAX_ROWS  = 1000;  // conversation_logs の保持上限（超えた分は毎日削除）
+const DUP_CACHE_SEC = 10;    // 同一メッセージを連打とみなす時間（秒）
+
+// --- トリガー間隔（変更した場合は setup() の再実行が必要）---
+const PUSH_CHECK_INTERVAL_MIN = 30; // 孤独プッシュ判定の実行間隔（分）
+const DAILY_RESET_HOUR        = 17; // 日次リセット（ログトリム・カウントリセット）の実行時刻
+
+// ▲▲▲ カスタマイズここまで ▲▲▲
 
 
 // =====================================
@@ -51,61 +77,61 @@ function doPost(e) {
     const body = JSON.parse(e.postData.contents);
 
     // Slack URL verification
-    if (body.type === ""url_verification"") {
+    if (body.type === "url_verification") {
       return ContentService.createTextOutput(body.challenge);
     }
 
     const event = body.event;
-    if (!event || event.type !== ""message"") {
-      return ContentService.createTextOutput(""ok"");
+    if (!event || event.type !== "message") {
+      return ContentService.createTextOutput("ok");
     }
 
     // Bot自身の発言は無視
-    if (event.bot_id || event.subtype === ""bot_message"") {
-      return ContentService.createTextOutput(""ok"");
+    if (event.bot_id || event.subtype === "bot_message") {
+      return ContentService.createTextOutput("ok");
     }
 
     // 対象チャンネル以外は無視
     if (event.channel !== SLACK_CHANNEL_ID) {
-      return ContentService.createTextOutput(""ok"");
+      return ContentService.createTextOutput("ok");
     }
 
     // リトライ防止（Slackは3秒以内に200を返さないとリトライする）
     const cache = CacheService.getScriptCache();
     const eventId = body.event_id || event.ts;
-    const dedupeKey = ""slack_evt_"" + eventId;
+    const dedupeKey = "slack_evt_" + eventId;
     if (cache.get(dedupeKey)) {
-      return ContentService.createTextOutput(""ok"");
+      return ContentService.createTextOutput("ok");
     }
-    cache.put(dedupeKey, ""1"", 300);
+    cache.put(dedupeKey, "1", 300);
 
-    const userId = event.user || """";
-    const userMessage = event.text || """";
+    const userId = event.user || "";
+    const userMessage = event.text || "";
 
     if (!userId || !userMessage) {
-      return ContentService.createTextOutput(""ok"");
+      return ContentService.createTextOutput("ok");
     }
 
     if (isDuplicate(userId, userMessage)) {
-      return ContentService.createTextOutput(""ok"");
+      return ContentService.createTextOutput("ok");
     }
 
-    handleMessage(userId, userMessage, null, ""user"");
+    handleMessage(userId, userMessage, null, "user");
 
-    return ContentService.createTextOutput(""ok"");
+    return ContentService.createTextOutput("ok");
 
   } catch (err) {
-    Logger.log(""doPost error: "" + err);
-    return ContentService.createTextOutput(""ok"");
+    Logger.log("doPost error: " + err);
+    return ContentService.createTextOutput("ok");
   }
 }
 
 function isDuplicate(userId, message) {
   const cache = CacheService.getScriptCache();
-  const key = ""ai_partner_dup_"" + userId;
+  const key = "ai_partner_dup_" + userId;
   const last = cache.get(key);
   if (last === message) return true;
-  cache.put(key, message, 10);
+  cache.put(key, message, DUP_CACHE_SEC);
   return false;
 }
 
@@ -117,9 +143,9 @@ function isDuplicate(userId, message) {
 function scheduledCheck() {
   const states = getAllUserStates();
   states.forEach(state => {
-    if (state.mode === ""pomodoro"") return;
+    if (state.mode === "pomodoro") return;
     if (shouldPush(state)) {
-      handleMessage(state.userId, ""__LONELY_EVENT__"", null, ""trigger"");
+      handleMessage(state.userId, "__LONELY_EVENT__", null, "trigger");
     }
   });
 }
@@ -131,15 +157,15 @@ function scheduledCheck() {
 
 function handleMessage(userId, userMessage, replyToken, source) {
   const cache = CacheService.getScriptCache();
-  const lockKey = ""ai_partner_recent_trigger_"" + userId;
+  const lockKey = "ai_partner_recent_trigger_" + userId;
 
-  if (source === ""user"" && cache.get(lockKey)) return;
-  if (source === ""trigger"") cache.put(lockKey, ""1"", 10);
+  if (source === "user" && cache.get(lockKey)) return;
+  if (source === "trigger") cache.put(lockKey, "1", 10);
 
-  if (source === ""user"") pushConversationLog(userId, ""user"", userMessage);
-  if (source === ""trigger"") pushConversationLog(userId, ""system"", userMessage);
+  if (source === "user") pushConversationLog(userId, "user", userMessage);
+  if (source === "trigger") pushConversationLog(userId, "system", userMessage);
 
-  const history = source === ""trigger"" ? [] : getRecentConversation(userId);
+  const history = source === "trigger" ? [] : getRecentConversation(userId);
   const builtMessage = buildUserMessage(userMessage, history);
   const result = callGemini(builtMessage);
 
@@ -148,33 +174,33 @@ function handleMessage(userId, userMessage, replyToken, source) {
   if (result.error) {
     if (result.status === 503) setForceNextPush(userId, true);
 
-    if (result.type === ""api"" && result.status === 429) {
-      replyText = ""Googleが「しゃべりすぎ」って言ってるロボ...冷却して再起動するから待つロボ 🙄"";
-    } else if (result.type === ""api"" && result.status === 503) {
-      replyText = ""Google側のサーバーが混雑してるロボ...私のせいじゃないロボ。もう一回トライするロボ 🔧"";
-    } else if (result.type === ""api"" && result.status === 404) {
-      replyText = ""モデルが見つからないロボ...設定を確認してほしいロボ 💢"";
-    } else if (result.type === ""network"") {
-      replyText = ""通信回線がサボってるロボ...インフラを叱ってほしいロボ 📡"";
-    } else if (result.status === ""NO_KEY"") {
-      replyText = ""APIキーが未設定だロボ！設定エリアを確認するロボ 🔑"";
+    if (result.type === "api" && result.status === 429) {
+      replyText = "Googleが「しゃべりすぎ」って言ってるロボ...冷却して再起動するから待つロボ 🙄";
+    } else if (result.type === "api" && result.status === 503) {
+      replyText = "Google側のサーバーが混雑してるロボ...私のせいじゃないロボ。もう一回トライするロボ 🔧";
+    } else if (result.type === "api" && result.status === 404) {
+      replyText = "モデルが見つからないロボ...設定を確認してほしいロボ 💢";
+    } else if (result.type === "network") {
+      replyText = "通信回線がサボってるロボ...インフラを叱ってほしいロボ 📡";
+    } else if (result.status === "NO_KEY") {
+      replyText = "APIキーが未設定だロボ！設定エリアを確認するロボ 🔑";
     } else {
-      replyText = ""想定外のエラーが発生したロボ...私は無罪だロボ。ログを確認するロボ 💢"";
+      replyText = "想定外のエラーが発生したロボ...私は無罪だロボ。ログを確認するロボ 💢";
     }
   } else {
     replyText = sanitize(result.text);
     clear503State(userId);
   }
 
-  pushConversationLog(userId, ""ai"", replyText);
+  pushConversationLog(userId, "ai", replyText);
   sendSlack(replyText);
 
-  if (source === ""user"") updateUserState(userId, false);
-  if (source === ""trigger"") updateUserState(userId, true);
+  if (source === "user") updateUserState(userId, false);
+  if (source === "trigger") updateUserState(userId, true);
 }
 
 function setForceNextPush(userId, flag = true) {
-  const sheet = SpreadsheetApp.getActive().getSheetByName(""user_state"");
+  const sheet = SpreadsheetApp.getActive().getSheetByName("user_state");
   if (!sheet) return;
   const data = sheet.getDataRange().getValues();
   for (let i = 1; i < data.length; i++) {
@@ -191,7 +217,7 @@ function setForceNextPush(userId, flag = true) {
 // =====================================
 
 function buildUserMessage(userMessage, history) {
-  const now = Utilities.formatDate(new Date(), ""Asia/Tokyo"", ""HH:mm"");
+  const now = Utilities.formatDate(new Date(), "Asia/Tokyo", "HH:mm");
 
   const roleGuide = `
 Conversation Rule:
@@ -204,18 +230,18 @@ Conversation Rule:
 - Never break character.
 `;
 
-  let eventBlock = """";
-  if (userMessage === ""__LONELY_EVENT__"") {
-    eventBlock = ""[System Event] Last interaction was a while ago. State that you are bored or lonely in a robotic way. Keep it short."";
-    userMessage = """";
+  let eventBlock = "";
+  if (userMessage === "__LONELY_EVENT__") {
+    eventBlock = "[System Event] Last interaction was a while ago. State that you are bored or lonely in a robotic way. Keep it short.";
+    userMessage = "";
   }
 
-  let historyBlock = """";
+  let historyBlock = "";
   if (history.length) {
-    historyBlock = ""【History】\n"" + history.map(h => `${h.role}: ${h.message}`).join(""\n"") + ""\n\n"";
+    historyBlock = "【History】\n" + history.map(h => `${h.role}: ${h.message}`).join("\n") + "\n\n";
   }
 
-  return roleGuide + `[Time:${now}]\n` + eventBlock + ""\n"" + historyBlock + userMessage;
+  return roleGuide + `[Time:${now}]\n` + eventBlock + "\n" + historyBlock + userMessage;
 }
 
 
@@ -225,15 +251,15 @@ Conversation Rule:
 
 function callGemini(userMessage) {
   try {
-    if (!GEMINI_API_KEY || GEMINI_API_KEY.includes(""★"")) {
-      return { error: true, type: ""system"", status: ""NO_KEY"" };
+    if (!GEMINI_API_KEY || GEMINI_API_KEY.includes("★")) {
+      return { error: true, type: "system", status: "NO_KEY" };
     }
 
     const systemText = `You are a friendly robot assistant named ${PARTNER_NAME}. You must end every sentence with 'ロボ'. Be funny, mechanical, and helpful. Keep responses concise (2-3 sentences). Respond in the same language the user uses.`;
 
     const payload = {
       systemInstruction: { parts: [{ text: systemText }] },
-      contents: [{ role: ""user"", parts: [{ text: userMessage }] }],
+      contents: [{ role: "user", parts: [{ text: userMessage }] }],
       generationConfig: {
         temperature: 0.8,
         maxOutputTokens: 2048,
@@ -246,26 +272,26 @@ function callGemini(userMessage) {
       res = UrlFetchApp.fetch(
         `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_NAME}:generateContent`,
         {
-          method: ""post"",
-          contentType: ""application/json"",
+          method: "post",
+          contentType: "application/json",
           payload: JSON.stringify(payload),
-          headers: { ""x-goog-api-key"": GEMINI_API_KEY },
+          headers: { "x-goog-api-key": GEMINI_API_KEY },
           muteHttpExceptions: true
         }
       );
     } catch (e) {
-      return { error: true, type: ""network"" };
+      return { error: true, type: "network" };
     }
 
     const status = res.getResponseCode();
-    const json = JSON.parse(res.getContentText() || ""{}"");
-    if (json.error) return { error: true, type: ""api"", status };
+    const json = JSON.parse(res.getContentText() || "{}");
+    if (json.error) return { error: true, type: "api", status };
 
-    const text = json.candidates?.[0]?.content?.parts?.map(p => p.text || """").join("""") || """";
+    const text = json.candidates?.[0]?.content?.parts?.map(p => p.text || "").join("") || "";
     return { error: false, text };
 
   } catch (e) {
-    return { error: true, type: ""system"" };
+    return { error: true, type: "system" };
   }
 }
 
@@ -275,17 +301,9 @@ function callGemini(userMessage) {
 // =====================================
 
 function shouldPush(state) {
-  const dailyLimit   = 5;
-  const silenceMin   = 60;
-  const ceilingMin   = 480;
-  const curvePower   = 1.3;
-  const lonelyFactor = 1.0;
-  const weightMorning = 0.7;
-  const weightDay     = 1.0;
-  const weightEvening = 1.2;
-  const weightNight   = 0.0;
+  // パラメータは全てファイル冒頭の「挙動カスタマイズ」ブロックに集約されています。
 
-  if (CacheService.getScriptCache().get(""push_cool_"" + state.userId)) return false;
+  if (CacheService.getScriptCache().get("push_cool_" + state.userId)) return false;
 
   if (state.force_next_push) {
     clear503State(state.userId);
@@ -296,24 +314,24 @@ function shouldPush(state) {
   if (!state.lastInteraction || isNaN(state.lastInteraction)) return false;
 
   const elapsedMin = (Date.now() - state.lastInteraction) / 60000;
-  if (elapsedMin < silenceMin) return false;
-  if (state.todayPushCount >= dailyLimit) return false;
+  if (elapsedMin < SILENCE_MIN) return false;
+  if (state.todayPushCount >= DAILY_PUSH_LIMIT) return false;
 
   const hour = new Date().getHours();
   let timeWeight = 0;
-  if      (hour >= 6  && hour < 10) timeWeight = weightMorning;
-  else if (hour >= 10 && hour < 18) timeWeight = weightDay;
-  else if (hour >= 18 && hour < 22) timeWeight = weightEvening;
-  else                               timeWeight = weightNight;
+  if      (hour >= 6  && hour < 10) timeWeight = WEIGHT_MORNING;
+  else if (hour >= 10 && hour < 18) timeWeight = WEIGHT_DAY;
+  else if (hour >= 18 && hour < 22) timeWeight = WEIGHT_EVENING;
+  else                               timeWeight = WEIGHT_NIGHT;
 
   if (timeWeight <= 0) return false;
 
   const randomBoost = 0.9 + Math.random() * 0.2;
-  const ratio = Math.min(1, (elapsedMin - silenceMin) / (ceilingMin - silenceMin));
-  const probability = Math.min(1, Math.pow(ratio, curvePower) * lonelyFactor * randomBoost * timeWeight);
+  const ratio = Math.min(1, (elapsedMin - SILENCE_MIN) / (CEILING_MIN - SILENCE_MIN));
+  const probability = Math.min(1, Math.pow(ratio, CURVE_POWER) * LONELY_FACTOR * randomBoost * timeWeight);
   const hit = Math.random() < probability;
 
-  if (hit) CacheService.getScriptCache().put(""push_cool_"" + state.userId, ""1"", 300);
+  if (hit) CacheService.getScriptCache().put("push_cool_" + state.userId, "1", PUSH_COOLDOWN_SEC);
   return hit;
 }
 
@@ -323,9 +341,9 @@ function shouldPush(state) {
 // =====================================
 
 function getAllUserStates() {
-  const sheet = getSheet(""user_state"", [
-    ""userId"", ""mode"", ""lastInteraction"", ""todayPushCount"",
-    ""consecutive_503"", ""force_next_push"", ""pomodoro_task"", ""pomodoro_start""
+  const sheet = getSheet("user_state", [
+    "userId", "mode", "lastInteraction", "todayPushCount",
+    "consecutive_503", "force_next_push", "pomodoro_task", "pomodoro_start"
   ]);
 
   return sheet.getDataRange().getValues().slice(1).map(r => {
@@ -341,15 +359,15 @@ function getAllUserStates() {
       lastInteraction: lastTs,
       todayPushCount: Number(r[3] || 0),
       consecutive_503: Number(r[4] || 0),
-      force_next_push: r[5] === true || String(r[5]).toUpperCase() === ""TRUE"",
-      pomodoro_task: r[6] || """",
+      force_next_push: r[5] === true || String(r[5]).toUpperCase() === "TRUE",
+      pomodoro_task: r[6] || "",
       pomodoro_start: r[7] ? new Date(r[7]).getTime() : null
     };
   });
 }
 
 function updateUserState(userId, isPush) {
-  const sheet = getSheet(""user_state"");
+  const sheet = getSheet("user_state");
   const data = sheet.getDataRange().getValues();
   const now = new Date();
 
@@ -359,21 +377,21 @@ function updateUserState(userId, isPush) {
         sheet.getRange(i + 1, 3).setValue(now);
         sheet.getRange(i + 1, 4).setValue(Number(data[i][3] || 0) + 1);
       } else {
-        sheet.getRange(i + 1, 3).setValue(new Date(now.getTime() + 60 * 60000));
+        sheet.getRange(i + 1, 3).setValue(new Date(now.getTime() + SILENCE_MIN * 60000));
       }
       return;
     }
   }
 
   sheet.appendRow([
-    userId, ""idle"",
-    new Date(now.getTime() + 60 * 60000),
-    isPush ? 1 : 0, 0, false, """", """"
+    userId, "idle",
+    new Date(now.getTime() + SILENCE_MIN * 60000),
+    isPush ? 1 : 0, 0, false, "", ""
   ]);
 }
 
 function clear503State(userId) {
-  const sheet = SpreadsheetApp.getActive().getSheetByName(""user_state"");
+  const sheet = SpreadsheetApp.getActive().getSheetByName("user_state");
   if (!sheet) return;
   const data = sheet.getDataRange().getValues();
   for (let i = 1; i < data.length; i++) {
@@ -390,21 +408,21 @@ function clear503State(userId) {
 // =====================================
 
 function pushConversationLog(userId, role, message) {
-  const sheet = getSheet(""conversation_logs"", [""time"", ""userId"", ""role"", ""message""]);
-  const now = Utilities.formatDate(new Date(), ""Asia/Tokyo"", ""yyyy/MM/dd HH:mm:ss"");
+  const sheet = getSheet("conversation_logs", ["time", "userId", "role", "message"]);
+  const now = Utilities.formatDate(new Date(), "Asia/Tokyo", "yyyy/MM/dd HH:mm:ss");
   sheet.appendRow([now, userId, role, message]);
 }
 
 function getRecentConversation(userId) {
-  const sheet = SpreadsheetApp.getActive().getSheetByName(""conversation_logs"");
+  const sheet = SpreadsheetApp.getActive().getSheetByName("conversation_logs");
   if (!sheet) return [];
   const lastRow = sheet.getLastRow();
   if (lastRow < 2) return [];
   const start = Math.max(2, lastRow - 100);
   const rows = sheet.getRange(start, 1, lastRow - start + 1, 4).getValues().reverse();
   return rows
-    .filter(r => r[1] === userId && (r[2] === ""user"" || r[2] === ""ai""))
-    .slice(0, 5)
+    .filter(r => r[1] === userId && (r[2] === "user" || r[2] === "ai"))
+    .slice(0, HISTORY_LIMIT)
     .reverse()
     .map(r => ({ role: r[2], message: r[3] }));
 }
@@ -415,26 +433,26 @@ function getRecentConversation(userId) {
 // =====================================
 
 function sendSlack(text) {
-  if (!SLACK_BOT_TOKEN || SLACK_BOT_TOKEN.includes(""★"")) {
-    Logger.log(""SLACK_BOT_TOKEN未設定"");
+  if (!SLACK_BOT_TOKEN || SLACK_BOT_TOKEN.includes("★")) {
+    Logger.log("SLACK_BOT_TOKEN未設定");
     return;
   }
 
   try {
-    UrlFetchApp.fetch(""https://slack.com/api/chat.postMessage"", {
-      method: ""post"",
-      contentType: ""application/json"",
-      headers: { ""Authorization"": ""Bearer "" + SLACK_BOT_TOKEN },
+    UrlFetchApp.fetch("https://slack.com/api/chat.postMessage", {
+      method: "post",
+      contentType: "application/json",
+      headers: { "Authorization": "Bearer " + SLACK_BOT_TOKEN },
       payload: JSON.stringify({
         channel: SLACK_CHANNEL_ID,
         text: text,
         username: PARTNER_NAME,
-        icon_emoji: "":robot_face:""
+        icon_emoji: ":robot_face:"
       }),
       muteHttpExceptions: true
     });
   } catch (e) {
-    Logger.log(""Slack send error: "" + e);
+    Logger.log("Slack send error: " + e);
   }
 }
 
@@ -454,7 +472,7 @@ function getSheet(name, headers) {
 }
 
 function sanitize(text) {
-  return text.replace(/^[（(][^）)]+[）)]\s*/g, """").trim();
+  return text.replace(/^[（(][^）)]+[）)]\s*/g, "").trim();
 }
 
 
@@ -463,7 +481,7 @@ function sanitize(text) {
 // =====================================
 
 function dailyReset() {
-  const sheet = SpreadsheetApp.getActive().getSheetByName(""user_state"");
+  const sheet = SpreadsheetApp.getActive().getSheetByName("user_state");
   if (sheet) {
     const data = sheet.getDataRange().getValues();
     for (let i = 1; i < data.length; i++) {
@@ -474,10 +492,10 @@ function dailyReset() {
 }
 
 function trimLogs() {
-  const sheet = SpreadsheetApp.getActive().getSheetByName(""conversation_logs"");
+  const sheet = SpreadsheetApp.getActive().getSheetByName("conversation_logs");
   if (!sheet) return;
   const lastRow = sheet.getLastRow();
-  if (lastRow > 1000) sheet.deleteRows(2, lastRow - 1000);
+  if (lastRow > LOG_MAX_ROWS) sheet.deleteRows(2, lastRow - LOG_MAX_ROWS);
 }
 
 
@@ -487,19 +505,19 @@ function trimLogs() {
 
 function setup() {
   SpreadsheetApp.getActiveSpreadsheet().getSheets();
-  UrlFetchApp.fetch(""https://example.com"", { muteHttpExceptions: true });
+  UrlFetchApp.fetch("https://example.com", { muteHttpExceptions: true });
   CacheService.getScriptCache();
 
-  getSheet(""user_state"", [
-    ""userId"", ""mode"", ""lastInteraction"", ""todayPushCount"",
-    ""consecutive_503"", ""force_next_push"", ""pomodoro_task"", ""pomodoro_start""
+  getSheet("user_state", [
+    "userId", "mode", "lastInteraction", "todayPushCount",
+    "consecutive_503", "force_next_push", "pomodoro_task", "pomodoro_start"
   ]);
-  getSheet(""conversation_logs"", [""time"", ""userId"", ""role"", ""message""]);
+  getSheet("conversation_logs", ["time", "userId", "role", "message"]);
 
   ScriptApp.getProjectTriggers().forEach(t => ScriptApp.deleteTrigger(t));
-  ScriptApp.newTrigger(""scheduledCheck"").timeBased().everyMinutes(30).create();
-  ScriptApp.newTrigger(""dailyReset"").timeBased().atHour(17).everyDays(1).create();
+  ScriptApp.newTrigger("scheduledCheck").timeBased().everyMinutes(PUSH_CHECK_INTERVAL_MIN).create();
+  ScriptApp.newTrigger("dailyReset").timeBased().atHour(DAILY_RESET_HOUR).everyDays(1).create();
 
-  Logger.log(""✅ 無料版（Slack）セットアップ完了！"");
-  Logger.log(""APIキーとSlackトークンを設定し、新バージョンとしてデプロイしてください。"");
+  Logger.log("✅ 無料版（Slack）セットアップ完了！");
+  Logger.log("APIキーとSlackトークンを設定し、新バージョンとしてデプロイしてください。");
 }

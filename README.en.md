@@ -28,7 +28,7 @@ Connect Telegram, LINE, or Slack to the Gemini API, with built-in lonely-push: t
 - **Duplicate & throttle guard** — CacheService prevents double-sends and spam
 - **Self-maintenance** — Daily log trimming and push count reset via time-based triggers
 - **Telegram**: polling via `getUpdates` (no webhook needed)
-- **LINE**: Webhook with Channel Secret signature verification
+- **LINE**: Webhook (Channel Secret field exists but signature verification is NOT implemented — GAS doesn't pass request headers to `doPost`)
 - **Slack**: URL verification + bot_message filtering
 
 ---
@@ -83,7 +83,7 @@ const PARTNER_NAME       = "Robo";
 const GEMINI_API_KEY     = "AIza...";
 const TELEGRAM_BOT_TOKEN = "123456789:AAF...";
 const TELEGRAM_CHAT_ID   = "123456789";  // your chat ID for lonely push
-const MODEL_NAME         = "gemini-2.0-flash";
+const MODEL_NAME         = "gemini-flash-latest";
 ```
 
 **Steps:**
@@ -103,8 +103,8 @@ const USER_NAME           = "Master";
 const PARTNER_NAME        = "Robo";
 const GEMINI_API_KEY      = "AIza...";
 const LINE_ACCESS_TOKEN   = "xxx...";
-const LINE_CHANNEL_SECRET = "yyy...";
-const MODEL_NAME          = "gemini-2.0-flash";
+const LINE_CHANNEL_SECRET = "yyy...";   // currently unused (see note above)
+const MODEL_NAME          = "gemini-flash-latest";
 ```
 
 1. Run `setup()`
@@ -123,7 +123,7 @@ const PARTNER_NAME     = "Robo";
 const GEMINI_API_KEY   = "AIza...";
 const SLACK_BOT_TOKEN  = "xoxb-...";
 const SLACK_CHANNEL_ID = "C...";
-const MODEL_NAME       = "gemini-2.0-flash";
+const MODEL_NAME       = "gemini-flash-latest";
 ```
 
 1. Run `setup()`

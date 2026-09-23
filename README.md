@@ -26,7 +26,7 @@
 - **孤独プッシュ** — 沈黙時間に応じた確率カーブで自発的にメッセージを送信
 - **重複・スロットル制御** — CacheService で連打・二重送信を防止
 - **セルフメンテナンス** — 毎日のログトリム・push カウントリセットを自動実行
-- **LINE版**: Channel Secret による Webhook 署名検証に対応
+- **LINE版**: Channel Secret 欄はありますが、GAS の制約上 Webhook 署名検証は実装していません（未使用）
 - **Slack版**: URL verification・bot_message フィルタリングに対応
 
 ---
@@ -41,7 +41,6 @@
 | Gemini API 連携 | ✅ | ✅ |
 | 孤独プッシュ | ✅（パラメータ固定） | ✅（UIから調整可） |
 | キャラクター設定 | 固定（ロボ口調） | 自由（スプシから変更） |
-| Telegram / WebUI | ❌ | ✅ |
 | 複数 LLM エンジン | Gemini のみ | Gemini / GPT / Claude / Grok 等 |
 | ブラウザ設定 UI | ❌ | ✅ |
 | ポモドーロタイマー | ❌ | ✅ |
@@ -69,8 +68,8 @@ const USER_NAME           = "マスター";
 const PARTNER_NAME        = "ロボ";
 const GEMINI_API_KEY      = "AIza...";
 const LINE_ACCESS_TOKEN   = "xxx...";
-const LINE_CHANNEL_SECRET = "yyy...";   // 推奨
-const MODEL_NAME          = "gemini-2.0-flash";
+const LINE_CHANNEL_SECRET = "yyy...";   // 現状未使用（GASの制約でヘッダー署名検証は不可）
+const MODEL_NAME          = "gemini-flash-latest";
 ```
 
 1. `setup()` を実行（シート・トリガー初期化）
@@ -87,7 +86,7 @@ const PARTNER_NAME     = "ロボ";
 const GEMINI_API_KEY   = "AIza...";
 const SLACK_BOT_TOKEN  = "xoxb-...";
 const SLACK_CHANNEL_ID = "C...";
-const MODEL_NAME       = "gemini-2.0-flash";
+const MODEL_NAME       = "gemini-flash-latest";
 ```
 
 1. `setup()` を実行
@@ -107,7 +106,7 @@ const PARTNER_NAME        = "ロボ";
 const GEMINI_API_KEY      = "AIza...";
 const TELEGRAM_BOT_TOKEN  = "123456789:AAF...";
 const TELEGRAM_CHAT_ID    = "123456789";  // 孤独プッシュ先
-const MODEL_NAME          = "gemini-2.0-flash";
+const MODEL_NAME          = "gemini-flash-latest";
 ```
 
 1. Bot Token を設定後、Bot にメッセージを送信

@@ -14,60 +14,72 @@
 // 【注意】
 // これは無料版です。詳細な設定（性格、確率、エラーメッセージ等）を変更するには
 // コード内の各数値を直接書き換える必要があります。
-// 便利な設定変更付きの完全版は有料で配布予定です。
+// 便利な設定変更付きの完全版はこちらで配布中です → https://note.com/nou_yakareta/m/mb0c5401f132f
 // ポモドーロタイマーは本バージョンでは実際には利用できません。
 // =====================================
 
 // ▼▼▼ 唯一設定が必要なエリア ▼▼▼
 
 // あなたの呼び名
-const USER_NAME = ""マスター"";
+const USER_NAME = "マスター";
 
 // パートナー（ロボット）の名前
-const PARTNER_NAME = ""ロボ"";
+const PARTNER_NAME = "ロボ";
 
 // Google AI StudioのAPIキー
-const GEMINI_API_KEY = ""★ここにGoogle AI StudioのAPIキーを入れます"";
+const GEMINI_API_KEY = "★ここにGoogle AI StudioのAPIキーを入れます";
 
 // LINE Developersのチャネルアクセストークン
-const LINE_ACCESS_TOKEN = ""★ここにLINE Developersのアクセストークンを入れます"";
+const LINE_ACCESS_TOKEN = "★ここにLINE Developersのアクセストークンを入れます";
 
-// LINE Developersのチャネルシークレット（安全のため推奨）
-const LINE_CHANNEL_SECRET = ""★ここにシークレットをいれてください（強く推奨）★"";
+// 【注意】GAS の doPost は受信ヘッダーを渡さないため、この無料版では
+// Channel Secret による署名検証は実行できません（設定しても効果はありません）。
+// なりすまし対策が必要な場合は、Webhook URL 自体を推測困難にする
+// （長いランダム文字列をクエリパラメータ等に付与する）方式を検討してください。
+const LINE_CHANNEL_SECRET = "★未使用（下記コメント参照）★";
 
 // 使用するモデル（最新の安定版を推奨）
-const MODEL_NAME = ""gemini-2.0-flash"";
+const MODEL_NAME = "gemini-flash-latest";
 
 // ▲▲▲ 設定エリア終了 ▲▲▲
 
 
-// =====================================
-// LINE SIGNATURE VERIFICATION
-// =====================================
+// ▼▼▼ 挙動カスタマイズ（お好みで調整。setup()の再実行は不要） ▼▼▼
 
-function verifyLineSignature(e) {
-  if (!LINE_CHANNEL_SECRET || LINE_CHANNEL_SECRET.includes(""★"")) return true;
+// --- 孤独プッシュ（沈黙検知）---
+const DAILY_PUSH_LIMIT = 5;     // 1日のpush上限
+const SILENCE_MIN      = 60;    // 抽選開始までの沈黙時間（分）／会話後に再抽選対象になるまでの時間でもある
+const CEILING_MIN      = 480;   // 天井：確率100%到達までの沈黙時間（分）
+const CURVE_POWER      = 1.3;   // 確率曲線の形状（0.5=甘えん坊 / 1.3=標準 / 2.0=クール）
+const LONELY_FACTOR    = 1.0;   // 寂しさ係数
+const WEIGHT_MORNING   = 0.7;   // 朝 (06-10) の発生係数。0=オフ
+const WEIGHT_DAY       = 1.0;   // 昼 (10-18) の発生係数
+const WEIGHT_EVENING   = 1.2;   // 夜 (18-22) の発生係数
+const WEIGHT_NIGHT     = 0.0;   // 深夜 (22-06) の発生係数。0=おやすみモード
+const PUSH_COOLDOWN_SEC = 300;  // pushが当たった後のクールダウン（秒）
 
-  const signature = e.headers[""x-line-signature""];
-  const content = e.postData.contents;
-  const check = Utilities.computeHmacSha256Signature(content, LINE_CHANNEL_SECRET);
-  const encoded = Utilities.base64Encode(check);
+// --- 会話・ログ ---
+const HISTORY_LIMIT = 5;     // 直近何件の会話をAIに渡すか
+const LOG_MAX_ROWS  = 1000;  // conversation_logs の保持上限（超えた分は毎日削除）
+const DUP_CACHE_SEC = 10;    // 同一メッセージを連打とみなす時間（秒）
+const THROTTLE_MS   = 4000;  // 連続送信を制限する間隔（ミリ秒）
 
-  return signature === encoded;
-}
+// --- トリガー間隔（変更した場合は setup() の再実行が必要）---
+const PUSH_CHECK_INTERVAL_MIN = 30; // 孤独プッシュ判定の実行間隔（分）
+const DAILY_RESET_HOUR        = 17; // 日次リセット（ログトリム・カウントリセット）の実行時刻
+
+// ▲▲▲ カスタマイズここまで ▲▲▲
 
 
 // =====================================
 // ENTRY: User Input (Webhook)
 // =====================================
+// 【注意】GAS の doPost はリクエストヘッダーを受け取れないため、
+// LINE の x-line-signature を使った署名検証はこの無料版では実装していません
+// （実装しても e.headers が常に undefined になり、確実に例外で落ちます）。
 
 function doPost(e) {
   try {
-    if (!verifyLineSignature(e)) {
-      Logger.log(""Signature verification failed"");
-      return;
-    }
-
     if (!e || !e.postData || !e.postData.contents) return;
 
     const body = JSON.parse(e.postData.contents);
@@ -83,27 +95,27 @@ function doPost(e) {
     if (isDuplicate(userId, userMessage)) return;
 
     if (isThrottled(userId)) {
-      replyMessage(replyToken, ""処理回路がオーバーヒートだロボ...冷却中だから少し待つロボ 🔧"");
-      pushConversationLog(userId, ""user"", userMessage);
+      replyMessage(replyToken, "処理回路がオーバーヒートだロボ...冷却中だから少し待つロボ 🔧");
+      pushConversationLog(userId, "user", userMessage);
       return;
     }
 
-    setThrottle(userId, 4000);
-    handleMessage(userId, userMessage, replyToken, ""user"");
+    setThrottle(userId, THROTTLE_MS);
+    handleMessage(userId, userMessage, replyToken, "user");
 
   } catch (err) {
-    Logger.log(""doPost error: "" + err);
+    Logger.log("doPost error: " + err);
   }
 }
 
 function isDuplicate(userId, message) {
   const cache = CacheService.getScriptCache();
-  const key = ""ai_partner_dup_"" + userId;
+  const key = "ai_partner_dup_" + userId;
   const last = cache.get(key);
 
   if (last === message) return true;
 
-  cache.put(key, message, 10);
+  cache.put(key, message, DUP_CACHE_SEC);
   return false;
 }
 
@@ -116,10 +128,10 @@ function scheduledCheck() {
   const states = getAllUserStates();
 
   states.forEach(function(state) {
-    if (state.mode === ""pomodoro"") return;
+    if (state.mode === "pomodoro") return;
 
     if (shouldPush(state)) {
-      handleMessage(state.userId, ""__LONELY_EVENT__"", null, ""trigger"");
+      handleMessage(state.userId, "__LONELY_EVENT__", null, "trigger");
     }
   });
 }
@@ -131,17 +143,17 @@ function scheduledCheck() {
 
 function handleMessage(userId, userMessage, replyToken, source) {
   const cache = CacheService.getScriptCache();
-  const lockKey = ""ai_partner_recent_trigger_"" + userId;
+  const lockKey = "ai_partner_recent_trigger_" + userId;
 
-  if (source === ""user"" && cache.get(lockKey)) return;
-  if (source === ""trigger"") cache.put(lockKey, ""1"", 10);
+  if (source === "user" && cache.get(lockKey)) return;
+  if (source === "trigger") cache.put(lockKey, "1", 10);
 
   if (checkPomodoroStart(userId, userMessage, replyToken)) return;
 
-  if (source === ""user"") pushConversationLog(userId, ""user"", userMessage);
-  if (source === ""trigger"") pushConversationLog(userId, ""system"", userMessage);
+  if (source === "user") pushConversationLog(userId, "user", userMessage);
+  if (source === "trigger") pushConversationLog(userId, "system", userMessage);
 
-  const history = (source === ""trigger"") ? [] : getRecentConversation(userId);
+  const history = (source === "trigger") ? [] : getRecentConversation(userId);
 
   const builtMessage = buildUserMessage(userMessage, history);
   const result = callGemini(builtMessage);
@@ -154,37 +166,37 @@ function handleMessage(userId, userMessage, replyToken, source) {
     }
 
     // エラー種別ごとのロボ風メッセージ
-    if (result.type === ""api"" && result.status === 429) {
-      replyText = ""Googleが「しゃべりすぎ」って言ってるロボ...冷却して再起動するから待つロボ 🙄"";
-    } else if (result.type === ""api"" && result.status === 503) {
-      replyText = ""Google側のサーバーが混雑してるロボ...私のせいじゃないロボ。もう一回トライするロボ 🔧"";
-    } else if (result.type === ""api"" && result.status === 404) {
-      replyText = ""モデルが見つからないロボ...設定を確認してほしいロボ 💢"";
-    } else if (result.type === ""network"") {
-      replyText = ""通信回線がサボってるロボ...インフラを叱ってほしいロボ 📡"";
-    } else if (result.status === ""NO_KEY"") {
-      replyText = ""APIキーが未設定だロボ！設定エリアを確認するロボ 🔑"";
+    if (result.type === "api" && result.status === 429) {
+      replyText = "Googleが「しゃべりすぎ」って言ってるロボ...冷却して再起動するから待つロボ 🙄";
+    } else if (result.type === "api" && result.status === 503) {
+      replyText = "Google側のサーバーが混雑してるロボ...私のせいじゃないロボ。もう一回トライするロボ 🔧";
+    } else if (result.type === "api" && result.status === 404) {
+      replyText = "モデルが見つからないロボ...設定を確認してほしいロボ 💢";
+    } else if (result.type === "network") {
+      replyText = "通信回線がサボってるロボ...インフラを叱ってほしいロボ 📡";
+    } else if (result.status === "NO_KEY") {
+      replyText = "APIキーが未設定だロボ！設定エリアを確認するロボ 🔑";
     } else {
-      replyText = ""想定外のエラーが発生したロボ...私は無罪だロボ。ログを確認するロボ 💢"";
+      replyText = "想定外のエラーが発生したロボ...私は無罪だロボ。ログを確認するロボ 💢";
     }
   } else {
     replyText = sanitize(result.text);
     clear503State(userId);
   }
 
-  pushConversationLog(userId, ""ai"", replyText);
+  pushConversationLog(userId, "ai", replyText);
 
   replyToken
     ? replyMessage(replyToken, replyText)
     : pushMessage(userId, replyText);
 
-  if (source === ""user"") updateUserState(userId, false);
-  if (source === ""trigger"") updateUserState(userId, true);
+  if (source === "user") updateUserState(userId, false);
+  if (source === "trigger") updateUserState(userId, true);
 }
 
 function setForceNextPush(userId, flag) {
   if (flag === undefined) flag = true;
-  const sheet = SpreadsheetApp.getActive().getSheetByName(""user_state"");
+  const sheet = SpreadsheetApp.getActive().getSheetByName("user_state");
   if (!sheet) return;
   const data = sheet.getDataRange().getValues();
 
@@ -204,38 +216,38 @@ function checkPomodoroStart() { return false; }
 // =====================================
 
 function buildUserMessage(userMessage, history) {
-  const now = Utilities.formatDate(new Date(), ""Asia/Tokyo"", ""HH:mm"");
+  const now = Utilities.formatDate(new Date(), "Asia/Tokyo", "HH:mm");
 
-  const roleGuide = ""\n"" +
-    ""Conversation Rule:\n"" +
-    ""- user is "" + USER_NAME + ""\n"" +
-    ""- ai is "" + PARTNER_NAME + ""\n"" +
-    ""- You are a humorous robot.\n"" +
-    ""- End EVERY sentence with 'ロボ' (robo).\n"" +
-    ""- Be helpful but talk like a funny machine.\n"" +
-    ""- Keep response concise (2-3 sentences max).\n"" +
-    ""- Never break character.\n"";
+  const roleGuide = "\n" +
+    "Conversation Rule:\n" +
+    "- user is " + USER_NAME + "\n" +
+    "- ai is " + PARTNER_NAME + "\n" +
+    "- You are a humorous robot.\n" +
+    "- End EVERY sentence with 'ロボ' (robo).\n" +
+    "- Be helpful but talk like a funny machine.\n" +
+    "- Keep response concise (2-3 sentences max).\n" +
+    "- Never break character.\n";
 
-  var eventBlock = """";
+  var eventBlock = "";
 
-  if (userMessage === ""__LONELY_EVENT__"") {
-    eventBlock = ""[System Event] Last interaction was a while ago. State that you are bored or lonely in a robotic way. Keep it short."";
-    userMessage = """";
+  if (userMessage === "__LONELY_EVENT__") {
+    eventBlock = "[System Event] Last interaction was a while ago. State that you are bored or lonely in a robotic way. Keep it short.";
+    userMessage = "";
   }
-  else if (userMessage.startsWith(""__POMODORO_END__"")) {
-    var task = userMessage.replace(""__POMODORO_END__"", """").trim();
-    eventBlock = '[System Event] Focus timer for ""' + task + '"" ended. Praise the user robotically.';
-    userMessage = """";
+  else if (userMessage.startsWith("__POMODORO_END__")) {
+    var task = userMessage.replace("__POMODORO_END__", "").trim();
+    eventBlock = '[System Event] Focus timer for "' + task + '" ended. Praise the user robotically.';
+    userMessage = "";
   }
 
-  var historyBlock = """";
+  var historyBlock = "";
   if (history.length) {
-    historyBlock = ""【History】\n"" + history.map(function(h) {
-      return h.role + "": "" + h.message;
-    }).join(""\n"") + ""\n\n"";
+    historyBlock = "【History】\n" + history.map(function(h) {
+      return h.role + ": " + h.message;
+    }).join("\n") + "\n\n";
   }
 
-  return roleGuide + ""[Time:"" + now + ""]\n"" + eventBlock + ""\n"" + historyBlock + userMessage;
+  return roleGuide + "[Time:" + now + "]\n" + eventBlock + "\n" + historyBlock + userMessage;
 }
 
 
@@ -245,21 +257,21 @@ function buildUserMessage(userMessage, history) {
 
 function callGemini(userMessage) {
   try {
-    if (!GEMINI_API_KEY || GEMINI_API_KEY.includes(""★"")) {
-      return { error: true, type: ""system"", status: ""NO_KEY"" };
+    if (!GEMINI_API_KEY || GEMINI_API_KEY.includes("★")) {
+      return { error: true, type: "system", status: "NO_KEY" };
     }
 
-    var systemText = ""You are a friendly robot assistant named "" + PARTNER_NAME + "". "" +
-      ""You must end every sentence with 'ロボ'. "" +
-      ""Be funny, mechanical, and helpful. "" +
-      ""Keep responses concise (2-3 sentences). "" +
-      ""Respond in the same language the user uses."";
+    var systemText = "You are a friendly robot assistant named " + PARTNER_NAME + ". " +
+      "You must end every sentence with 'ロボ'. " +
+      "Be funny, mechanical, and helpful. " +
+      "Keep responses concise (2-3 sentences). " +
+      "Respond in the same language the user uses.";
 
-    var url = ""https://generativelanguage.googleapis.com/v1beta/models/"" + MODEL_NAME + "":generateContent"";
+    var url = "https://generativelanguage.googleapis.com/v1beta/models/" + MODEL_NAME + ":generateContent";
 
     var payload = {
       systemInstruction: { parts: [{ text: systemText }] },
-      contents: [{ role: ""user"", parts: [{ text: userMessage }] }],
+      contents: [{ role: "user", parts: [{ text: userMessage }] }],
       generationConfig: {
         temperature: 0.8,
         maxOutputTokens: 2048,
@@ -270,36 +282,36 @@ function callGemini(userMessage) {
     var res;
     try {
       res = UrlFetchApp.fetch(url, {
-        method: ""post"",
-        contentType: ""application/json"",
+        method: "post",
+        contentType: "application/json",
         payload: JSON.stringify(payload),
-        headers: { ""x-goog-api-key"": GEMINI_API_KEY },
+        headers: { "x-goog-api-key": GEMINI_API_KEY },
         muteHttpExceptions: true
       });
     } catch (e) {
-      Logger.log(""Network Error: "" + e);
-      return { error: true, type: ""network"" };
+      Logger.log("Network Error: " + e);
+      return { error: true, type: "network" };
     }
 
     var status = res.getResponseCode();
-    var json = JSON.parse(res.getContentText() || ""{}"");
+    var json = JSON.parse(res.getContentText() || "{}");
 
     if (json.error) {
-      Logger.log(""Gemini API Error: "" + JSON.stringify(json.error));
-      return { error: true, type: ""api"", status: status };
+      Logger.log("Gemini API Error: " + JSON.stringify(json.error));
+      return { error: true, type: "api", status: status };
     }
 
     var candidate = json.candidates && json.candidates[0];
-    var text = """";
+    var text = "";
     if (candidate && candidate.content && candidate.content.parts) {
-      text = candidate.content.parts.map(function(p) { return p.text || """"; }).join("""");
+      text = candidate.content.parts.map(function(p) { return p.text || ""; }).join("");
     }
 
     return { error: false, text: text };
 
   } catch (e) {
-    Logger.log(""System Error: "" + e);
-    return { error: true, type: ""system"" };
+    Logger.log("System Error: " + e);
+    return { error: true, type: "system" };
   }
 }
 
@@ -322,20 +334,9 @@ function callGemini(userMessage) {
 // =====================================
 
 function shouldPush(state) {
-  // --- ハードコード設定（無料版） ---
-  // 変更したい場合はここの数値を直接書き換えてください
-  var dailyLimit    = 5;     // 1日のpush上限
-  var silenceMin    = 60;    // 抽選開始までの沈黙時間（分）
-  var ceilingMin    = 480;   // 天井：確率100%到達までの沈黙時間（分）
-  var curvePower    = 1.3;   // 確率曲線の形状
-  var lonelyFactor  = 1.0;   // 寂しさ係数
-  var weightMorning = 0.7;   // 朝 (06-10) の発生係数。0=オフ
-  var weightDay     = 1.0;   // 昼 (10-18) の発生係数
-  var weightEvening = 1.2;   // 夜 (18-22) の発生係数
-  var weightNight   = 0.0;   // 深夜 (22-06) の発生係数。0=おやすみモード
-  // --- ハードコード設定ここまで ---
+  // パラメータは全てファイル冒頭の「挙動カスタマイズ」ブロックに集約されています。
 
-  if (CacheService.getScriptCache().get(""push_cool_"" + state.userId)) return false;
+  if (CacheService.getScriptCache().get("push_cool_" + state.userId)) return false;
 
   // force push（503リカバリ）
   if (state.force_next_push) {
@@ -349,18 +350,18 @@ function shouldPush(state) {
   var elapsedMin = (Date.now() - state.lastInteraction) / 60000;
 
   // 抽選開始前
-  if (elapsedMin < silenceMin) return false;
+  if (elapsedMin < SILENCE_MIN) return false;
 
   // 日次上限
-  if (state.todayPushCount >= dailyLimit) return false;
+  if (state.todayPushCount >= DAILY_PUSH_LIMIT) return false;
 
   // 時間帯係数
   var hour = new Date().getHours();
   var timeWeight = 0;
-  if (hour >= 6 && hour < 10)       timeWeight = weightMorning;
-  else if (hour >= 10 && hour < 18) timeWeight = weightDay;
-  else if (hour >= 18 && hour < 22) timeWeight = weightEvening;
-  else                               timeWeight = weightNight;
+  if (hour >= 6 && hour < 10)       timeWeight = WEIGHT_MORNING;
+  else if (hour >= 10 && hour < 18) timeWeight = WEIGHT_DAY;
+  else if (hour >= 18 && hour < 22) timeWeight = WEIGHT_EVENING;
+  else                               timeWeight = WEIGHT_NIGHT;
 
   // timeWeight=0 なら即リターン（完全オフ）
   if (timeWeight <= 0) return false;
@@ -370,15 +371,15 @@ function shouldPush(state) {
 
   // 確率曲線（スロットマシン方式）
   // ratio: 0（抽選開始）→ 1.0（天井）
-  var ratio = Math.min(1, (elapsedMin - silenceMin) / (ceilingMin - silenceMin));
-  var baseProb = Math.pow(ratio, curvePower) * lonelyFactor * randomBoost * timeWeight;
+  var ratio = Math.min(1, (elapsedMin - SILENCE_MIN) / (CEILING_MIN - SILENCE_MIN));
+  var baseProb = Math.pow(ratio, CURVE_POWER) * LONELY_FACTOR * randomBoost * timeWeight;
   var probability = Math.min(1, baseProb);
 
   var hit = Math.random() < probability;
 
-  // 当たり時：5分クールダウン
+  // 当たり時：クールダウン
   if (hit) {
-    CacheService.getScriptCache().put(""push_cool_"" + state.userId, ""1"", 300);
+    CacheService.getScriptCache().put("push_cool_" + state.userId, "1", PUSH_COOLDOWN_SEC);
   }
 
   return hit;
@@ -390,9 +391,9 @@ function shouldPush(state) {
 // =====================================
 
 function getAllUserStates() {
-  var sheet = getSheet(""user_state"", [
-    ""userId"", ""mode"", ""lastInteraction"", ""todayPushCount"",
-    ""consecutive_503"", ""force_next_push"", ""pomodoro_task"", ""pomodoro_start""
+  var sheet = getSheet("user_state", [
+    "userId", "mode", "lastInteraction", "todayPushCount",
+    "consecutive_503", "force_next_push", "pomodoro_task", "pomodoro_start"
   ]);
 
   var data = sheet.getDataRange().getValues().slice(1);
@@ -407,7 +408,7 @@ function getAllUserStates() {
     }
 
     var rawForce = r[5];
-    var forceFlag = (rawForce === true) || (String(rawForce).toUpperCase() === ""TRUE"");
+    var forceFlag = (rawForce === true) || (String(rawForce).toUpperCase() === "TRUE");
 
     return {
       userId: r[0],
@@ -416,14 +417,14 @@ function getAllUserStates() {
       todayPushCount: Number(r[3] || 0),
       consecutive_503: Number(r[4] || 0),
       force_next_push: forceFlag,
-      pomodoro_task: r[6] || """",
+      pomodoro_task: r[6] || "",
       pomodoro_start: r[7] ? new Date(r[7]).getTime() : null
     };
   });
 }
 
 function updateUserState(userId, isPush) {
-  var sheet = getSheet(""user_state"");
+  var sheet = getSheet("user_state");
   var data = sheet.getDataRange().getValues();
   var now = new Date();
 
@@ -435,9 +436,8 @@ function updateUserState(userId, isPush) {
         sheet.getRange(i + 1, 3).setValue(now);
         sheet.getRange(i + 1, 4).setValue(Number(data[i][3] || 0) + 1);
       } else {
-        // ユーザーが話しかけた＝寂しさゼロ。silenceMin後から再抽選
-        var silenceMin = 60;
-        var nextEligible = new Date(now.getTime() + silenceMin * 60000);
+        // ユーザーが話しかけた＝寂しさゼロ。SILENCE_MIN後から再抽選
+        var nextEligible = new Date(now.getTime() + SILENCE_MIN * 60000);
         sheet.getRange(i + 1, 3).setValue(nextEligible);
       }
       return;
@@ -445,16 +445,15 @@ function updateUserState(userId, isPush) {
   }
 
   // 新規ユーザー
-  var silenceMinNew = 60;
   sheet.appendRow([
-    userId, ""idle"",
-    new Date(now.getTime() + silenceMinNew * 60000),
-    isPush ? 1 : 0, 0, false, """", """"
+    userId, "idle",
+    new Date(now.getTime() + SILENCE_MIN * 60000),
+    isPush ? 1 : 0, 0, false, "", ""
   ]);
 }
 
 function clear503State(userId) {
-  var sheet = SpreadsheetApp.getActive().getSheetByName(""user_state"");
+  var sheet = SpreadsheetApp.getActive().getSheetByName("user_state");
   if (!sheet) return;
   var data = sheet.getDataRange().getValues();
   for (var i = 1; i < data.length; i++) {
@@ -471,14 +470,14 @@ function clear503State(userId) {
 // =====================================
 
 function pushConversationLog(userId, role, message) {
-  var sheet = getSheet(""conversation_logs"", [""time"", ""userId"", ""role"", ""message""]);
-  var now = Utilities.formatDate(new Date(), ""Asia/Tokyo"", ""yyyy/MM/dd HH:mm:ss"");
+  var sheet = getSheet("conversation_logs", ["time", "userId", "role", "message"]);
+  var now = Utilities.formatDate(new Date(), "Asia/Tokyo", "yyyy/MM/dd HH:mm:ss");
   sheet.appendRow([now, userId, role, message]);
 }
 
 function getRecentConversation(userId) {
-  var limit = 5;
-  var sheet = SpreadsheetApp.getActive().getSheetByName(""conversation_logs"");
+  var limit = HISTORY_LIMIT;
+  var sheet = SpreadsheetApp.getActive().getSheetByName("conversation_logs");
   if (!sheet) return [];
 
   var lastRow = sheet.getLastRow();
@@ -490,7 +489,7 @@ function getRecentConversation(userId) {
 
   var rows = sheet.getRange(start, 1, numRows, 4).getValues().reverse();
   var filtered = rows.filter(function(r) {
-    return r[1] === userId && (r[2] === ""user"" || r[2] === ""ai"");
+    return r[1] === userId && (r[2] === "user" || r[2] === "ai");
   });
 
   return filtered.slice(0, limit).reverse().map(function(r) {
@@ -514,15 +513,15 @@ function getSheet(name, headers) {
 }
 
 function sanitize(text) {
-  return text.replace(/^[（(][^）)]+[）)]\s*/g, """").trim();
+  return text.replace(/^[（(][^）)]+[）)]\s*/g, "").trim();
 }
 
 function isThrottled(userId) {
-  return !!CacheService.getScriptCache().get(""ai_partner_th_"" + userId);
+  return !!CacheService.getScriptCache().get("ai_partner_th_" + userId);
 }
 
 function setThrottle(userId, ttlMs) {
-  CacheService.getScriptCache().put(""ai_partner_th_"" + userId, ""1"", Math.ceil(ttlMs / 1000));
+  CacheService.getScriptCache().put("ai_partner_th_" + userId, "1", Math.ceil(ttlMs / 1000));
 }
 
 
@@ -531,32 +530,32 @@ function setThrottle(userId, ttlMs) {
 // =====================================
 
 function replyMessage(replyToken, text) {
-  sendLine({ replyToken: replyToken, text: text, mode: ""reply"" });
+  sendLine({ replyToken: replyToken, text: text, mode: "reply" });
 }
 
 function pushMessage(userId, text) {
-  sendLine({ userId: userId, text: text, mode: ""push"" });
+  sendLine({ userId: userId, text: text, mode: "push" });
 }
 
 function sendLine(o) {
-  var url = o.mode === ""reply""
-    ? ""https://api.line.me/v2/bot/message/reply""
-    : ""https://api.line.me/v2/bot/message/push"";
+  var url = o.mode === "reply"
+    ? "https://api.line.me/v2/bot/message/reply"
+    : "https://api.line.me/v2/bot/message/push";
 
-  var payload = o.mode === ""reply""
-    ? { replyToken: o.replyToken, messages: [{ type: ""text"", text: o.text }] }
-    : { to: o.userId, messages: [{ type: ""text"", text: o.text }] };
+  var payload = o.mode === "reply"
+    ? { replyToken: o.replyToken, messages: [{ type: "text", text: o.text }] }
+    : { to: o.userId, messages: [{ type: "text", text: o.text }] };
 
   try {
     UrlFetchApp.fetch(url, {
-      method: ""post"",
-      contentType: ""application/json"",
-      headers: { Authorization: ""Bearer "" + LINE_ACCESS_TOKEN },
+      method: "post",
+      contentType: "application/json",
+      headers: { Authorization: "Bearer " + LINE_ACCESS_TOKEN },
       payload: JSON.stringify(payload),
       muteHttpExceptions: true
     });
   } catch (e) {
-    Logger.log(""LINE send error: "" + e);
+    Logger.log("LINE send error: " + e);
   }
 }
 
@@ -566,12 +565,12 @@ function sendLine(o) {
 // =====================================
 
 function endPomodoro(userId) {
-  var sheet = SpreadsheetApp.getActive().getSheetByName(""user_state"");
+  var sheet = SpreadsheetApp.getActive().getSheetByName("user_state");
   if (!sheet) return;
   var data = sheet.getDataRange().getValues();
   for (var i = 1; i < data.length; i++) {
     if (data[i][0] === userId) {
-      sheet.getRange(i + 1, 2).setValue(""idle"");
+      sheet.getRange(i + 1, 2).setValue("idle");
       sheet.getRange(i + 1, 7).clearContent();
       sheet.getRange(i + 1, 8).clearContent();
       return;
@@ -585,7 +584,7 @@ function endPomodoro(userId) {
 // =====================================
 
 function dailyReset() {
-  var sheet = SpreadsheetApp.getActive().getSheetByName(""user_state"");
+  var sheet = SpreadsheetApp.getActive().getSheetByName("user_state");
   if (sheet) {
     var data = sheet.getDataRange().getValues();
     for (var i = 1; i < data.length; i++) {
@@ -596,11 +595,10 @@ function dailyReset() {
 }
 
 function trimLogs() {
-  var sheet = SpreadsheetApp.getActive().getSheetByName(""conversation_logs"");
+  var sheet = SpreadsheetApp.getActive().getSheetByName("conversation_logs");
   if (!sheet) return;
   var lastRow = sheet.getLastRow();
-  var maxRows = 1000;
-  if (lastRow > maxRows) sheet.deleteRows(2, lastRow - maxRows);
+  if (lastRow > LOG_MAX_ROWS) sheet.deleteRows(2, lastRow - LOG_MAX_ROWS);
 }
 
 
@@ -611,22 +609,22 @@ function trimLogs() {
 function setup() {
   // 権限取得
   SpreadsheetApp.getActiveSpreadsheet().getSheets();
-  UrlFetchApp.fetch(""https://example.com"", { muteHttpExceptions: true });
+  UrlFetchApp.fetch("https://example.com", { muteHttpExceptions: true });
   CacheService.getScriptCache();
 
   // シート作成
-  getSheet(""user_state"", [
-    ""userId"", ""mode"", ""lastInteraction"", ""todayPushCount"",
-    ""consecutive_503"", ""force_next_push"", ""pomodoro_task"", ""pomodoro_start""
+  getSheet("user_state", [
+    "userId", "mode", "lastInteraction", "todayPushCount",
+    "consecutive_503", "force_next_push", "pomodoro_task", "pomodoro_start"
   ]);
-  getSheet(""conversation_logs"", [""time"", ""userId"", ""role"", ""message""]);
+  getSheet("conversation_logs", ["time", "userId", "role", "message"]);
 
   // トリガー再登録
   ScriptApp.getProjectTriggers().forEach(function(t) { ScriptApp.deleteTrigger(t); });
-  ScriptApp.newTrigger(""scheduledCheck"").timeBased().everyMinutes(30).create();
-  ScriptApp.newTrigger(""dailyReset"").timeBased().atHour(17).everyDays(1).create();
+  ScriptApp.newTrigger("scheduledCheck").timeBased().everyMinutes(PUSH_CHECK_INTERVAL_MIN).create();
+  ScriptApp.newTrigger("dailyReset").timeBased().atHour(DAILY_RESET_HOUR).everyDays(1).create();
 
-  Logger.log(""✅ 無料版セットアップ完了！"");
-  Logger.log(""APIキーとLINEトークンを設定し、新バージョンとしてデプロイしてください。"");
+  Logger.log("✅ 無料版セットアップ完了！");
+  Logger.log("APIキーとLINEトークンを設定し、新バージョンとしてデプロイしてください。");
 }
 

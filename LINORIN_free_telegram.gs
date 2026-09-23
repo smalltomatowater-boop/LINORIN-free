@@ -15,7 +15,7 @@
 // これは無料版（Telegram専用）です。
 // 詳細な設定（性格、確率、エラーメッセージ等）を変更するには
 // コード内の各数値を直接書き換える必要があります。
-// 便利な設定変更付きの完全版は有料で配布予定です。
+// 便利な設定変更付きの完全版はこちらで配布中です → https://note.com/nou_yakareta/m/mb0c5401f132f
 // ポモドーロタイマーは本バージョンでは実際には利用できません。
 // =====================================
 // 【Telegramの仕様メモ】
@@ -43,9 +43,36 @@ const TELEGRAM_BOT_TOKEN = "★ここにBotFatherのトークンを入れます"
 const TELEGRAM_CHAT_ID = "★ここにチャットIDを入れます";
 
 // 使用するモデル（最新の安定版を推奨）
-const MODEL_NAME = "gemini-2.0-flash";
+const MODEL_NAME = "gemini-flash-latest";
 
 // ▲▲▲ 設定エリア終了 ▲▲▲
+
+
+// ▼▼▼ 挙動カスタマイズ（お好みで調整。setup()の再実行は不要） ▼▼▼
+
+// --- 孤独プッシュ（沈黙検知）---
+const DAILY_PUSH_LIMIT = 5;     // 1日のpush上限
+const SILENCE_MIN      = 60;    // 抽選開始までの沈黙時間（分）／会話後に再抽選対象になるまでの時間でもある
+const CEILING_MIN      = 480;   // 天井：確率100%到達までの沈黙時間（分）
+const CURVE_POWER      = 1.3;   // 確率曲線の形状（0.5=甘えん坊 / 1.3=標準 / 2.0=クール）
+const LONELY_FACTOR    = 1.0;   // 寂しさ係数
+const WEIGHT_MORNING   = 0.7;   // 朝 (06-10) の発生係数。0=オフ
+const WEIGHT_DAY       = 1.0;   // 昼 (10-18) の発生係数
+const WEIGHT_EVENING   = 1.2;   // 夜 (18-22) の発生係数
+const WEIGHT_NIGHT     = 0.0;   // 深夜 (22-06) の発生係数。0=おやすみモード
+const PUSH_COOLDOWN_SEC = 300;  // pushが当たった後のクールダウン（秒）
+
+// --- 会話・ログ ---
+const HISTORY_LIMIT = 5;     // 直近何件の会話をAIに渡すか
+const LOG_MAX_ROWS  = 1000;  // conversation_logs の保持上限（超えた分は毎日削除）
+const DUP_CACHE_SEC = 10;    // 同一メッセージを連打とみなす時間（秒）
+const THROTTLE_MS   = 4000;  // 連続送信を制限する間隔（ミリ秒）
+
+// --- トリガー間隔（変更した場合は setup() の再実行が必要）---
+const POLL_INTERVAL_MIN = 1; // ポーリング（新着取得）+ 孤独プッシュ判定の実行間隔（分）
+const DAILY_RESET_HOUR  = 17; // 日次リセット（ログトリム・カウントリセット）の実行時刻
+
+// ▲▲▲ カスタマイズここまで ▲▲▲
 
 
 // =====================================
@@ -91,7 +118,7 @@ function pollTelegramUpdates() {
       const userMessage = msg.text;
 
       if (!isDuplicate(userId, userMessage) && !isThrottled(userId)) {
-        setThrottle(userId, 4000);
+        setThrottle(userId, THROTTLE_MS);
         handleMessage(userId, userMessage, chatId, "user");
       }
     }
@@ -303,17 +330,7 @@ function callGemini(userMessage) {
 // =====================================
 
 function shouldPush(state) {
-  // --- ハードコード設定（無料版） ---
-  var dailyLimit    = 5;
-  var silenceMin    = 60;
-  var ceilingMin    = 480;
-  var curvePower    = 1.3;
-  var lonelyFactor  = 1.0;
-  var weightMorning = 0.7;
-  var weightDay     = 1.0;
-  var weightEvening = 1.2;
-  var weightNight   = 0.0;
-  // --- ハードコード設定ここまで ---
+  // パラメータは全てファイル冒頭の「挙動カスタマイズ」ブロックに集約されています。
 
   if (CacheService.getScriptCache().get("push_cool_" + state.userId)) return false;
 
@@ -327,27 +344,27 @@ function shouldPush(state) {
 
   var elapsedMin = (Date.now() - state.lastInteraction) / 60000;
 
-  if (elapsedMin < silenceMin) return false;
-  if (state.todayPushCount >= dailyLimit) return false;
+  if (elapsedMin < SILENCE_MIN) return false;
+  if (state.todayPushCount >= DAILY_PUSH_LIMIT) return false;
 
   var hour = new Date().getHours();
   var timeWeight = 0;
-  if (hour >= 6 && hour < 10)       timeWeight = weightMorning;
-  else if (hour >= 10 && hour < 18) timeWeight = weightDay;
-  else if (hour >= 18 && hour < 22) timeWeight = weightEvening;
-  else                               timeWeight = weightNight;
+  if (hour >= 6 && hour < 10)       timeWeight = WEIGHT_MORNING;
+  else if (hour >= 10 && hour < 18) timeWeight = WEIGHT_DAY;
+  else if (hour >= 18 && hour < 22) timeWeight = WEIGHT_EVENING;
+  else                               timeWeight = WEIGHT_NIGHT;
 
   if (timeWeight <= 0) return false;
 
   var randomBoost = 0.9 + Math.random() * 0.2;
-  var ratio = Math.min(1, (elapsedMin - silenceMin) / (ceilingMin - silenceMin));
-  var baseProb = Math.pow(ratio, curvePower) * lonelyFactor * randomBoost * timeWeight;
+  var ratio = Math.min(1, (elapsedMin - SILENCE_MIN) / (CEILING_MIN - SILENCE_MIN));
+  var baseProb = Math.pow(ratio, CURVE_POWER) * LONELY_FACTOR * randomBoost * timeWeight;
   var probability = Math.min(1, baseProb);
 
   var hit = Math.random() < probability;
 
   if (hit) {
-    CacheService.getScriptCache().put("push_cool_" + state.userId, "1", 300);
+    CacheService.getScriptCache().put("push_cool_" + state.userId, "1", PUSH_COOLDOWN_SEC);
   }
 
   return hit;
@@ -402,18 +419,16 @@ function updateUserState(userId, isPush) {
         sheet.getRange(i + 1, 3).setValue(now);
         sheet.getRange(i + 1, 4).setValue(Number(data[i][3] || 0) + 1);
       } else {
-        var silenceMin = 60;
-        var nextEligible = new Date(now.getTime() + silenceMin * 60000);
+        var nextEligible = new Date(now.getTime() + SILENCE_MIN * 60000);
         sheet.getRange(i + 1, 3).setValue(nextEligible);
       }
       return;
     }
   }
 
-  var silenceMinNew = 60;
   sheet.appendRow([
     userId, "idle",
-    new Date(now.getTime() + silenceMinNew * 60000),
+    new Date(now.getTime() + SILENCE_MIN * 60000),
     isPush ? 1 : 0, 0, false, "", ""
   ]);
 }
@@ -442,7 +457,7 @@ function pushConversationLog(userId, role, message) {
 }
 
 function getRecentConversation(userId) {
-  var limit = 5;
+  var limit = HISTORY_LIMIT;
   var sheet = SpreadsheetApp.getActive().getSheetByName("conversation_logs");
   if (!sheet) return [];
 
@@ -487,7 +502,7 @@ function isDuplicate(userId, message) {
   const key = "ai_partner_dup_" + userId;
   const last = cache.get(key);
   if (last === message) return true;
-  cache.put(key, message, 10);
+  cache.put(key, message, DUP_CACHE_SEC);
   return false;
 }
 
@@ -548,8 +563,7 @@ function trimLogs() {
   var sheet = SpreadsheetApp.getActive().getSheetByName("conversation_logs");
   if (!sheet) return;
   var lastRow = sheet.getLastRow();
-  var maxRows = 1000;
-  if (lastRow > maxRows) sheet.deleteRows(2, lastRow - maxRows);
+  if (lastRow > LOG_MAX_ROWS) sheet.deleteRows(2, lastRow - LOG_MAX_ROWS);
 }
 
 
@@ -576,8 +590,8 @@ function setup() {
 
   // トリガー再登録
   ScriptApp.getProjectTriggers().forEach(function(t) { ScriptApp.deleteTrigger(t); });
-  ScriptApp.newTrigger("scheduledEveryMinute").timeBased().everyMinutes(1).create();
-  ScriptApp.newTrigger("dailyReset").timeBased().atHour(17).everyDays(1).create();
+  ScriptApp.newTrigger("scheduledEveryMinute").timeBased().everyMinutes(POLL_INTERVAL_MIN).create();
+  ScriptApp.newTrigger("dailyReset").timeBased().atHour(DAILY_RESET_HOUR).everyDays(1).create();
 
   Logger.log("✅ 無料版（Telegram）セットアップ完了！");
   Logger.log("チャットIDがわからない場合は getTelegramChatId() を実行してください。");
