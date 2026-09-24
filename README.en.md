@@ -2,6 +2,8 @@
 
 # LINORIN Free
 
+![LINORIN](assets/LINORIN2.png)
+
 **LINORIN** — A lightweight AI chatbot framework running entirely on Google Apps Script.
 Connect Telegram, LINE, or Slack to the Gemini API, with built-in lonely-push: the bot proactively messages you when you've been quiet for a while.
 
